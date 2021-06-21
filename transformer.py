@@ -32,7 +32,6 @@ class TransformerEncoder(nn.Module):
         self.embedding = embedding
 
     def forward(self, sources, mask):
-
         sources = self.embedding(sources)
 
         for encoder_layer in self.encoder_layers:
@@ -56,6 +55,48 @@ class TransformerEncoderLayer(nn.Module):
         attn = self.self_attention(query=x, key=x, value=x, mask=mask)
         out = self.attention_norm(attn + x)
         ff = self.feedforward_layer(out)
+        out = self.feedforward_norm(ff + out)
+        return out
+
+
+class TransformerDecoder(nn.Module):
+    def __init__(self, num_layers, dim_model, num_heads, dim_ff, dropout_prob, embedding):
+        super(TransformerDecoder, self).__init__()
+        self.dim_model = dim_model
+        self.embedding = embedding
+        self.decoder_layers = nn.ModuleList(
+            [TransformerDecoderLayer(dim_model, num_heads, dim_ff, dropout_prob) for _ in num_layers])
+        self.generator = nn.Linear(embedding.embedding_dim, embedding.vocab_size)
+
+    def forward(self, x, memory, memory_mask, targets_mask=None):
+        for decoder_layer in self.decoder_layers:
+            x = decoder_layer(x, memory, memory_mask, targets_mask)
+        output = self.generator(x)
+        return output
+
+
+class TransformerDecoderLayer(nn.Module):
+    def __init__(self, dim_model, num_heads, dim_ff, dropout_prob):
+        super(TransformerDecoderLayer, self).__init__()
+        self.self_attention = MultiHeadAttention(dim_model=dim_model, num_heads=num_heads, dropout_prob=dropout_prob)
+        self.attention_norm = nn.LayerNorm(normalized_shape=dim_model)
+
+        self.memory_attention = MultiHeadAttention(dim_model=dim_model, num_heads=num_heads, dropout_prob=dropout_prob)
+        self.memory_norm = nn.LayerNorm(normalized_shape=dim_model)
+
+        self.feed_forward = PositionWiseFeedForwardNetwork(
+            dim_model=dim_model, dim_ff=dim_ff, dropout_prob=dropout_prob
+        )
+        self.feedforward_norm = nn.LayerNorm(normalized_shape=dim_model)
+
+    def forward(self, x, memory, memory_mask, targets_mask):
+        attn = self.self_attention(query=x, key=x, value=x, mask=targets_mask)
+        out = self.attention_norm(attn + x)
+
+        memory_attn = self.memory_attention(query=out, key=memory, value=memory, mask=memory_mask)
+        out = self.memory_norm(memory_attn + out)
+
+        ff = self.feed_forward(out)
         out = self.feedforward_norm(ff + out)
         return out
 
